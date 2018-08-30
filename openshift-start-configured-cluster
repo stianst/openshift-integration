@@ -63,17 +63,12 @@ oc adm ca create-server-cert \
 
 openssl x509 -in $OC_CONFIG/keycloak.crt -out $OC_CONFIG/cert-only.crt
 
-X509_CERT=`cat $OC_CONFIG/cert-only.crt`
-X509_KEY=`cat $OC_CONFIG/keycloak.key`
-X509_CA=`cat $OC_CONFIG/openshift-apiserver/ca.crt`
+oc create secret tls keycloak-server-tls --cert=$OC_CONFIG/cert-only.crt --key=$OC_CONFIG/keycloak.key
+oc create secret generic keycloak-client-tls --from-file=tls.crt=$OC_CONFIG/kube-apiserver/ca-bundle.crt
 
 oc new-app -f keycloak-https.json \
-    -p X509_CERT="$X509_CERT" \
-    -p X509_KEY="$X509_KEY" \
-    -p X509_CA="$X509_CA" \
     -p KEYCLOAK_USER=admin \
     -p KEYCLOAK_PASSWORD=admin
-
 
 echo "Restarting with Oauth Metadata"
 oc cluster down
@@ -89,7 +84,6 @@ done
 oc cluster up --base-dir=$OC_CONFIG --public-hostname $OC_PUBLIC_IP --server-loglevel=$OC_SERVER_LOG_LEVEL $OC_TAG
 
 echo "Startup completed"
-
 
 #get pod name
 SLEEP=5
@@ -128,3 +122,12 @@ oc rsh $KEYCLOAK_POD ./keycloak/bin/kcadm.sh update realms/master \
     --config /tmp/.kcadm.config -r master \
     -s accessTokenLifespanForImplicitFlow=86400 \
     -s accessTokenLifespan=86400
+echo "Creating token review client"
+oc rsh $KEYCLOAK_POD ./keycloak/bin/kcadm.sh create clients \
+    --config /tmp/.kcadm.config -r master \
+    -s clientId=token-review \
+    -s enabled=true \
+    -s publicClient=false \
+    -s "redirectUris=[\"*\"]" \
+    -s "attributes={\"x509.subjectdn\": \"CN=openshift-signer.*\"}" \
+    -s clientAuthenticatorType=client-x509
